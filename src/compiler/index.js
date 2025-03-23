@@ -280,6 +280,43 @@ const createRenderer = (option) => {
      * @param {HTMLElement} container 容器
      */
     const patchKeyedChildren = (ov, nv, container) => {
+        // !简单 diff 算法
+        // simpleDiff(ov, nv, container);
+
+        //! 双端 diff 算法
+        doubleEndedDiff(ov, nv, container);
+    };
+
+    /**
+     * @description 挂载组件
+     * @param {Object} vnode 虚拟DOM
+     * @param {HTMLElement} container 容器
+     */
+    const mountComponent = (vnode, container) => {
+        const subTree = vnode.type();
+        vnode.subTree = subTree;
+        patch(null, subTree, container);
+    };
+
+    /**
+     * @description 更新组件
+     * @param {Object} ov 旧虚拟DOM
+     * @param {Object} nv 新虚拟DOM
+     */
+    const patchComponent = (ov, nv, container) => {
+        const subTree = nv.type();
+        nv.subTree = subTree;
+        patch(ov.subTree, subTree, container);
+    };
+
+
+    /**
+     * @description 简单 diff 算法
+     * @param {@} ov 
+     * @param {*} nv 
+     * @param {*} container 
+     */
+    const simpleDiff = (ov, nv, container) => {
         //! 暂时使用傻瓜方式, 逐个卸载旧子节点, 然后逐个挂载新子节点 => 等 diff 算法实现后再替换
         // ov.children.forEach(child => unmount(child));
         // nv.children.forEach(child => patch(null, child, container));
@@ -307,73 +344,80 @@ const createRenderer = (option) => {
         // }
 
         //! 优化后的简单 diff 算法
-        // const oldChildren = ov.children;
-        // const newChildren = nv.children;
+        const oldChildren = ov.children;
+        const newChildren = nv.children;
 
-        // // 用来存储寻找过程中遇到的最大索引值
-        // let lastIndex = 0;
-        // // 遍历新的子节点
-        // for (let i = 0; i < newChildren.length; i++) {
-        //     const newVnode = newChildren[i];
+        // 用来存储寻找过程中遇到的最大索引值
+        let lastIndex = 0;
+        // 遍历新的子节点
+        for (let i = 0; i < newChildren.length; i++) {
+            const newVnode = newChildren[i];
 
-        //     // 在第一层循环中定义变量 find，代表是否在旧的一组子节点中找到可复用的节点
-        //     let find = false;
-        //     // 遍历旧的子节点 => 移动 DOM
-        //     for (let j = 0; j < oldChildren.length; j++) {
-        //         const oldVnode = oldChildren[j];
-        //         //! key 存在的前提 如果新旧子节点的 key 相同，则进行打补
-        //         if (newVnode.key === oldVnode.key) {
-        //             find = true;
-        //             patch(oldVnode, newVnode, container);
-        //             if (j < lastIndex) {
-        //                 /**
-        //                  *  从 [1, 2, 3, 4] 变成  [3, 1, 2, 4]  显而易见的发现 1 的位置变到 3 的后面, 
-        //                  *  3 寻找的 oldIndex 是 2, 1 的 oldIndex 是 0
-        //                  */
-        //                 // 代码运行到这里，说明 newVNode 对应的真实 DOM 需要移动, 先获取 newVNode 的前一个 vnode，即 prevVNode
-        //                 const prevVNode = newChildren[i - 1];
-        //                 if (prevVNode) {
-        //                     // 使用 nextSibling 而是不是 nextElementSibling 是因为：nextSibling 返回下一个节点（元素节点、文本节点或注释节点）。元素之间的空白也是文本节点。 *** 主要是这个空白
-        //                     const anchor = prevVNode.el.nextSibling
-        //                     insert(newVnode.el, container, anchor);
-        //                 }
-        //                 // 如果 prevVNode 不存在，则说明当前 newVNode 是第一个节点，它不需要移动
-        //             } else {
-        //                 /**
-        //                  * 从 [1, 2, 3, 4] 变成  [1, 2, 4, 3]  显而易见的发现 3 的位置变到 4 的后面,
-        //                  */
-        //                 lastIndex = j;
-        //             }
-        //             break;
-        //         }
-        //     }
+            // 在第一层循环中定义变量 find，代表是否在旧的一组子节点中找到可复用的节点
+            let find = false;
+            // 遍历旧的子节点 => 移动 DOM
+            for (let j = 0; j < oldChildren.length; j++) {
+                const oldVnode = oldChildren[j];
+                //! key 存在的前提 如果新旧子节点的 key 相同，则进行打补
+                if (newVnode.key === oldVnode.key) {
+                    find = true;
+                    patch(oldVnode, newVnode, container);
+                    if (j < lastIndex) {
+                        /**
+                         *  从 [1, 2, 3, 4] 变成  [3, 1, 2, 4]  显而易见的发现 1 的位置变到 3 的后面, 
+                         *  3 寻找的 oldIndex 是 2, 1 的 oldIndex 是 0
+                         */
+                        // 代码运行到这里，说明 newVNode 对应的真实 DOM 需要移动, 先获取 newVNode 的前一个 vnode，即 prevVNode
+                        const prevVNode = newChildren[i - 1];
+                        if (prevVNode) {
+                            // 使用 nextSibling 而是不是 nextElementSibling 是因为：nextSibling 返回下一个节点（元素节点、文本节点或注释节点）。元素之间的空白也是文本节点。 *** 主要是这个空白
+                            const anchor = prevVNode.el.nextSibling
+                            insert(newVnode.el, container, anchor);
+                        }
+                        // 如果 prevVNode 不存在，则说明当前 newVNode 是第一个节点，它不需要移动
+                    } else {
+                        /**
+                         * 从 [1, 2, 3, 4] 变成  [1, 2, 4, 3]  显而易见的发现 3 的位置变到 4 的后面,
+                         */
+                        lastIndex = j;
+                    }
+                    break;
+                }
+            }
 
-        //     // 遍历子节点之后, 如果还未找到可复用的, 则代表 newVnode 是新增节点
-        //     if (!find) {
-        //         // 为了将节点挂载到正确位置, 我们需要先获取锚点元素, 获取当前 newVNode 的前一个 vnode 节点
-        //         const prevVNode = newChildren[i - 1];
-        //         let anchor = null;
-        //         if (prevVNode) {
-        //             anchor = prevVNode.el.nextSibling;
-        //         } else {
-        //             // 如果 prevVnode 不存在, 则代表新增节点是第一个子节点
-        //             // 这时我们使用容器元素的 firstChild 作为锚点
-        //             anchor = container.firstChild;
-        //         }
+            // 遍历子节点之后, 如果还未找到可复用的, 则代表 newVnode 是新增节点
+            if (!find) {
+                // 为了将节点挂载到正确位置, 我们需要先获取锚点元素, 获取当前 newVNode 的前一个 vnode 节点
+                const prevVNode = newChildren[i - 1];
+                let anchor = null;
+                if (prevVNode) {
+                    anchor = prevVNode.el.nextSibling;
+                } else {
+                    // 如果 prevVnode 不存在, 则代表新增节点是第一个子节点
+                    // 这时我们使用容器元素的 firstChild 作为锚点
+                    anchor = container.firstChild;
+                }
 
-        //         // 挂载 newVNode
-        //         patch(null, newVnode, container, anchor)
-        //     }
-        // }
+                // 挂载 newVNode
+                patch(null, newVnode, container, anchor)
+            }
+        }
 
-        // // 移除已经不需要的节点
-        // for (let i = 0; i < oldChildren.length; i++) {
-        //     const oldVnode = oldChildren[i];
-        //     const has = newChildren.find(newVnode => newVnode.key === oldVnode.key);
-        //     !has && unmount(oldVnode);
-        // }
+        // 移除已经不需要的节点
+        for (let i = 0; i < oldChildren.length; i++) {
+            const oldVnode = oldChildren[i];
+            const has = newChildren.find(newVnode => newVnode.key === oldVnode.key);
+            !has && unmount(oldVnode);
+        }
+    };
 
-        //! 双端 diff 算法
+    /**
+     * @description 双端 diff 算法
+     * @param {*} ov 
+     * @param {*} nv 
+     * @param {*} container 
+     */
+    const doubleEndedDiff = (ov, nv, container) => {
         const oldChildren = ov.children;
         const newChildren = nv.children;
         // 四个索引值
@@ -445,28 +489,6 @@ const createRenderer = (option) => {
                 unmount(oldChildren[i]);
             }
         }
-    };
-
-    /**
-     * @description 挂载组件
-     * @param {Object} vnode 虚拟DOM
-     * @param {HTMLElement} container 容器
-     */
-    const mountComponent = (vnode, container) => {
-        const subTree = vnode.type();
-        vnode.subTree = subTree;
-        patch(null, subTree, container);
-    };
-
-    /**
-     * @description 更新组件
-     * @param {Object} ov 旧虚拟DOM
-     * @param {Object} nv 新虚拟DOM
-     */
-    const patchComponent = (ov, nv, container) => {
-        const subTree = nv.type();
-        nv.subTree = subTree;
-        patch(ov.subTree, subTree, container);
     };
 
     return {
