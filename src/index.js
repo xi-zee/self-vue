@@ -150,3 +150,4 @@ const vnode = () => ({
 effect(() => {
     render(vnode(), ROOT);
 })
+
