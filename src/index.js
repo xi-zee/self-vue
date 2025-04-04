@@ -9,7 +9,7 @@ import { resolveClass, resolveStyle } from '@/utils/style.js';
 import './index.scss';
 
 // 创建一个渲染器函数，基于浏览器环境
-const { render, onMounted } = createRenderer({
+const { render, onMounted, defineAsyncComponent } = createRenderer({
     insert: (el, parent, anchor = null) => {
         parent.insertBefore(el, anchor);
     },
@@ -146,6 +146,8 @@ const MyComponent = {
     //     }
     // }
 }
+
+const AsyncComponent = () => import('./compiler/test/demo1.js');
 
 const list = ref([
     { id: 1, name: 'foo' },
@@ -287,6 +289,58 @@ const vnode = () => ({
                 }),
             },
             children: 'reverse list add new item',
+        },
+        {
+            type: defineAsyncComponent({
+                loader: () => new Promise((resolve, reject) => {
+                    setTimeout(() => {
+                        reject('加载失败!')
+                    }, 1000)
+                }),
+                errorComponent: {
+                    name: 'ErrorComponent',
+                    props: {
+                        error: {
+                            type: Error,
+                        }
+                    },
+                    setup(props) {
+                        return () => {
+                            return {
+                                type: 'div',
+                                key: 'the-async-component-error',
+                                children: '加载失败',
+                            }
+                        }
+                    }
+                },
+                loadingComponent: {
+                    name: 'loadingComponent',
+                    props: {
+                        style: resolveStyle({
+                            
+                        })
+                    },
+                    setup(props) {
+                        return () => {
+                            return {
+                                type: 'div',
+                                key: 'the-async-component-loading',
+                                children: '加载中...',
+                            }
+                        }
+                    }
+                },
+                onError: (retry, fail, retries) => {
+                    if (retries >= 3) {
+                        fail();
+                        return;
+                    }
+                    setTimeout(() => {
+                        retry();
+                    }, 1000);
+                }
+            }),
         }
     ],
 });
@@ -294,4 +348,3 @@ const vnode = () => ({
 effect(() => {
     render(vnode(), ROOT);
 })
-

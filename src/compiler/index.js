@@ -2,7 +2,7 @@
  * @file 虚拟DOM渲染器
  */
 
-import { effect, reactive, shallowReactive, shallowReadonly } from '@vue/reactivity';
+import { effect, reactive, ref, shallowRef, shallowReactive, shallowReadonly } from '@vue/reactivity';
 
 import { hasOwn, notEmpty, getSequence } from '@/utils/index';
 import { resolveProps, hasPropsChanged } from '@/utils/props';
@@ -121,6 +121,11 @@ const createRenderer = (option) => {
         // TODO: 触发 unbind 钩子函数
         // 需要递归卸载子节点
         Array.isArray(vnode.children) && vnode.children.forEach(child => unmount(child));
+
+        if (typeof vnode.type === 'object') {
+            unmount(vnode.component.subTree);
+            return;
+        }
 
         if (notEmpty(vnode.props)) {
             for (const key in vnode.props) {
@@ -499,7 +504,7 @@ const createRenderer = (option) => {
      * @param {Object} nv 新虚拟DOM
      * @param {HTMLElement} container 容器
      */
-    const patchComponent = (ov, nv, anchor) => {
+    const patchComponent = (ov, nv, container, anchor) => {
         // 获取组件实例，即 n1.component
         const instance = (nv.component = ov.component);
         // 本身就是 shallowReactive 的 props, 直接赋值即可就可以触发响应式更新
@@ -522,6 +527,15 @@ const createRenderer = (option) => {
                 }
             }
             // attrs 与 props 同理
+            const { attrs } = instance;
+            for (const key in nv.attrs) {
+                attrs[key] = nv.attrs[key];
+            }
+            for (const key in attrs) {
+                if (!key in nv.attrs) {
+                    Reflect.deleteProperty(attrs, key);
+                }
+            }
         }
     };
 
@@ -855,7 +869,128 @@ const createRenderer = (option) => {
 
     };
 
+    const defineAsyncComponent = (options) => {
+        if (!options) throw Error('defineAsyncComponent need a param')
+        let InnerComponent = null;
+
+        const finalOptions = {};
+
+        switch (typeof options) {
+            case 'function':
+                finalOptions.loader = options;
+                break
+            case 'object':
+                Object.assign(finalOptions, options);
+                break;
+            default:
+                break
+        }
+
+        // 记录重试次数
+        let retries = 0;
+        const doLoad = () => {
+            return finalOptions.loader().catch(err => {
+                // 如果用户指定了 onError 回调，则将控制权交给用户
+                if (finalOptions.onError) {
+                    // 返回一个新的 Promise 实例
+                    return new Promise((resolve, reject) => {
+                        // 重试
+                        const retry = () => {
+                            resolve(doLoad());
+                            retries++;
+                        };
+                        const fail = () => {
+                            reject(err);
+                        }
+                        finalOptions.onError(retry, fail, retries);
+                    });
+                } else {
+                    // 如果没有指定 onError 回调，则直接抛出错误
+                    throw err;
+                }
+            })
+        }
+
+        return {
+            name: 'AsyncComponentWrapper',
+            setup() {
+                const { loader } = finalOptions;
+                // 异步组件是否加载成功
+                const loaded = ref(false);
+                // 异步组件是否加载超时
+                const timeout = ref(false);
+                let timer = null;
+                // 异步组件加载失败时的错误信息
+                const error = shallowRef(null);
+                // 一个标志，代表是否正在加载，默认为 false
+                const loading = ref(false);
+                let loadingTimer = null
+
+                const placeholder = {
+                    type: Comment,
+                    children: 'Async Component Loading...'
+                }
+
+                if (finalOptions.delay) {
+                    // 设置延迟加载的定时器
+                    loadingTimer = setTimeout(() => {
+                        loading.value = true;
+                    }, finalOptions.delay);
+                } else {
+                    loading.value = true;
+                }
+
+                // loader 是一个函数，表示异步加载组件的函数
+                // 通过 loader 函数获取组件
+                doLoad().then((component) => {
+                    InnerComponent = component.default || component;
+                    loaded.value = true;
+                }).catch((err) => {
+                    console.error('Async component loading failed:', err);
+                    error.value = err;
+                }).finally(() => {
+                    // 清除定时器
+                    timer && clearTimeout(timer);
+                    loadingTimer && clearTimeout(loadingTimer);
+                })
+
+                if (finalOptions.timeout) {
+                    // 设置定时器，超时后将 timeout 设置为 true
+                    timer = setTimeout(() => {
+                        timeout.value = true;
+                        // 超时后创建一个错误对象，并复制给 error.value
+                        const err = new Error(`Async component timed out after${finalOptions.timeout}ms.`)
+                        error.value = err;
+                    }, finalOptions.timeout);
+                }
+
+                return () => {
+                    if (loaded.value) {
+                        // 如果异步组件加载成功，则渲染异步组件
+                        return {
+                            type: InnerComponent,
+                        };
+                    } else if (error.value && finalOptions.errorComponent) {
+                        // 如果异步组件加载超时，则渲染超时提示
+                        return { 
+                            type: finalOptions.errorComponent,
+                            props: { error: error.value },
+                        };
+                    } else if (loading.value && finalOptions.loadingComponent) {
+                        // 如果异步组件正在加载，则渲染加载提示
+                        return {
+                            type: finalOptions.loadingComponent,
+                        };
+                    }
+                    
+                    return placeholder;
+                }
+            },
+        }
+    };
+
     return {
+        defineAsyncComponent,
         render,
         onMounted,
     }
