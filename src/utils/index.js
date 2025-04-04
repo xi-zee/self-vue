@@ -57,3 +57,14 @@ export function getSequence(arr) {
     }
     return result;
 }
+
+
+
+/**
+ * @description 使用 random 生成随机数，汲取符合 16 进制的颜色值
+ * @returns {String} 颜色值
+ */
+
+export function randomColor() {
+    return '#' + Math.floor(Math.random() * 0xffffff).toString(16).padEnd(6, '0');
+}
