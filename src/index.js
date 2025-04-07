@@ -9,7 +9,7 @@ import { resolveClass, resolveStyle } from '@/utils/style.js';
 import './index.scss';
 
 // 创建一个渲染器函数，基于浏览器环境
-const { render, onMounted, defineAsyncComponent } = createRenderer({
+const { render, onMounted, defineAsyncComponent, KeepAlive } = createRenderer({
     insert: (el, parent, anchor = null) => {
         parent.insertBefore(el, anchor);
     },
@@ -42,25 +42,17 @@ const MyComponent = {
         const { title } = props;
 
         onMounted(() => {
-            console.log('callback 1')
+            console.log('mounted', title);
             setTimeout(() => {
                 randomColor.value = getRandomColor();  
             }, 3000);
-        })
-
-        onMounted(() => {
-            console.log('callback 2')
         })
 
         return () => {
             return {
                 type: 'div',
                 props: {
-                    style: resolveStyle('margin: 8px 16px; font-size: 16px; cursor: pointer; user-select: none;'),
-                    onClick: () => {
-                        randomColor.value = getRandomColor();
-                        emit('change', randomColor.value);
-                    },
+                    style: resolveStyle('margin: 8px 16px; font-size: 16px; user-select: none;'),
                 },
                 children: [
                     {
@@ -80,6 +72,13 @@ const MyComponent = {
                     {
                         type: 'div',
                         key: 'the-my-component-slot-header',
+                        props: {
+                            onClick: () => {
+                                randomColor.value = getRandomColor();
+                                emit('change', randomColor.value);
+                            },
+                            style: resolveStyle('cursor: pointer; user-select: none;'),
+                        },
                         children: slots.header ? [slots.header()] : null,
                     },
                     {
@@ -147,6 +146,51 @@ const MyComponent = {
     // }
 }
 
+function FuncComponent(props) {
+    return {
+        type: 'div',
+        key: 'the-func-component',
+        props: {
+            style: resolveStyle('margin-left: 12px;'),
+        },
+        children: [
+            {
+                type: 'h4',
+                key: 'the-func-component-child-1',
+                children: props.title,
+            },
+            {
+                type: 'p',
+                key: 'the-func-component-child-2',
+                props: {
+                    style: resolveStyle(`color: ${props.color};`),
+                },
+                children: props.content,
+            },
+            {
+                type: Text,
+                key: 'the-func-component-child-3',
+                children: '#####################',
+            },
+        ]
+    }
+}
+
+FuncComponent.props = {
+    title: {
+        type: String,
+        default: 'default title',
+    },
+    color: {
+        type: String,
+        default: 'red',
+    },
+    content: {
+        type: String,
+        default: 'default content',
+    },
+}
+
 const AsyncComponent = () => import('./compiler/test/demo1.js');
 
 const list = ref([
@@ -173,7 +217,7 @@ const vnode = () => ({
     type: 'div',
     key: 'the-div',
     props: {
-        style: resolveStyle('font-size: 16px;cursor: pointer;'),
+        style: resolveStyle('font-size: 16px'),
         class: resolveClass({
             'container': true,
             'container-active': count.value > 0,
@@ -195,7 +239,7 @@ const vnode = () => ({
         {
             type: 'button',
             props: {
-                style: resolveStyle('margin-left: 10px;'),
+                style: resolveStyle('margin-left: 12px;'),
                 onClick: () => {
                     count.value++;
                 },
@@ -274,6 +318,32 @@ const vnode = () => ({
                 },
             }
         },
+        {
+            type: FuncComponent,
+            key: 'the-func-component',
+            props: {
+                title: 'is a function component',
+                color: getRandomColor(),
+                content: 'this is a function component',
+            },
+        },
+        {
+            type: KeepAlive,
+            key: 'the-keep-alive',
+            props: {
+                include: new RegExp('AsyncComponent'),
+            },
+            children: {
+                default() {
+                    return {
+                        type: defineAsyncComponent({
+                            loader: AsyncComponent,
+                        }),
+                        key: 'the-async-component',
+                    }
+                },
+            }
+        },
         someVnode.value,
         {
             type: 'button',
@@ -332,13 +402,13 @@ const vnode = () => ({
                     }
                 },
                 onError: (retry, fail, retries) => {
-                    if (retries >= 3) {
+                    if (retries >= 2) {
                         fail();
                         return;
                     }
                     setTimeout(() => {
                         retry();
-                    }, 1000);
+                    }, 0);
                 }
             }),
         }

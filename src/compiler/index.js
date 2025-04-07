@@ -34,6 +34,10 @@ export const Fragment = Symbol.for('Fragment');
  * }
  */
 
+/** KeepAlive 组件的特殊标识 */
+export const IsKeepAlive = Symbol.for('KeepAlive')
+export const shouldKeepAlive = Symbol.for('shouldKeepAlive')
+
 /**
  * @description 创建一个渲染器
  * @param {Object} option 配置项
@@ -86,6 +90,83 @@ const createRenderer = (option) => {
         }
     }
 
+    const onUnmounted = (callback) => {
+        if (currentInstance) {
+            currentInstance.unmounted.push(callback);
+        } else {
+            console.error('onUnmounted 函数只能在 setup 中调用');
+        }
+    }
+
+    const KeepAlive = {
+        // KeepAlive 组件独有的属性，用作标识
+        [IsKeepAlive]: true,
+        props: {
+            include: RegExp,
+            exclude: RegExp,
+        },
+        setup(props, { slots }) {
+            // 创建一个缓存对象 key: vnode.type  value: vnode
+            const cache = new Map();
+            // 当前 KeepAlive 组件的实例
+            const instance = currentInstance;
+            // 对于 KeepAlive 组件来说，它的实例上存在特殊的 keepAliveCtx 对象，该对象由渲染器注入
+            // 该对象会暴露渲染器的一些内部方法，其中 move 函数用来将一段 DOM 移动到另一个容器中
+            const { move, createElement } = instance.keepAliveCtx;
+
+            // 创建隐藏容器
+            const storageContainer = createElement('div');
+            // KeepAlive 组件的实例上会被添加两个内部函数，分别是 Symbol('deActivate')和 Symbol('activate')
+            Reflect.set(instance, '_deActivate', (vnode) => {
+                move(vnode, storageContainer);
+            })
+
+            Reflect.set(instance, '_activate', (vnode, container, anchor) => {
+                move(vnode, container, anchor);
+            })
+
+            return () => {
+                // KeepAlive 的默认插槽就是要被 KeepAlive 的组件
+                let rawVNode = slots.default();
+                // 如果不是组件，直接渲染即可，因为非组件的虚拟节点无法被 KeepAlive
+                if (typeof rawVNode.type !== 'object') {
+                    return rawVNode
+                }
+
+                // 获取组件的 name
+                const name = rawVNode.type.name;
+                // 如果组件的 name 不符合 include 和 exclude 的正则表达式，则直接渲染即可，因为非组件的虚拟节点无法被 KeepAlive
+                if (
+                    name &&
+                    (
+                        (props.include && !props.include.test(name)) ||
+                        (props.exclude && props.exclude.test(name))
+                    )
+                ) {
+                    return rawVNode
+                }
+
+                // 在挂载时先获取缓存的组件 vnode
+                const cachedVNode = cache.get(rawVNode.type);
+                if (cachedVNode) {
+                    // 如果有缓存的内容，则说明不应该执行挂载，而应该执行激活
+                    rawVNode.component = cachedVNode.component;
+                    rawVNode.keptAlive = true;
+                } else {
+                    // 如果没有缓存，则将其添加到缓存中，这样下次激活组件时就不会执行新的挂载动作了
+                    cache.set(rawVNode.type, rawVNode);
+                }
+
+                // 在组件 vnode 上添加 shouldKeepAlive 属性，并标记为 true，避免渲染器真的将组件卸载
+                Reflect.set(rawVNode, shouldKeepAlive, true);
+                // 将 KeepAlive 组件的实例也添加到 vnode 上，以便在渲染器中访问
+                rawVNode.keepAliveInstance = instance;
+
+                return rawVNode;
+            }
+        },
+    }
+
     /**
      * @description 简单的虚拟DOM渲染器
      * @param {Object} vnode 虚拟DOM
@@ -123,7 +204,16 @@ const createRenderer = (option) => {
         Array.isArray(vnode.children) && vnode.children.forEach(child => unmount(child));
 
         if (typeof vnode.type === 'object') {
-            unmount(vnode.component.subTree);
+            // vnode.shouldKeepAlive 是一个布尔值，用来标识该组件是否应该被 KeepAlive
+            if (vnode[shouldKeepAlive]) {
+                vnode.keepAliveInstance._deActivate(vnode);
+            } else {
+                // 则beforeUnmount 和 unmounted 生命周期钩子函数
+                unmount(vnode.component.subTree);
+                vnode.component.onUnmounted && vnode.component.onUnmounted.forEach(hook => {
+                    hook();
+                });
+            }
             return;
         }
 
@@ -139,19 +229,6 @@ const createRenderer = (option) => {
             vnode.children.forEach(child => unmount(child));
             // Fragment 不对应任何真实的 DOM 元素，所以直接返回
             return
-        }
-
-
-        // 卸载组件
-        if (typeof vnode.type === 'function') {
-            // TODO
-            // 触发组件的 beforeUnmount 生命周期
-            // 触发组件的 unmounted 生命周期
-            // 触发组件的 unbind 钩子函数
-            // 触发组件的 removeEventListener
-            // 触发组件的 removeAttribute
-            // 触发组件的 removeChild
-            vnode.subTree && unmount(vnode.subTree);
         }
 
         const parent = vnode.el?.parentNode;
@@ -210,10 +287,18 @@ const createRenderer = (option) => {
                 // 如果旧 vnode 存在，只需要使用新 Fragment 的子节点更新旧 Fragment 的子节点即
                 patchChildren(ov, nv, container);
             }
-        } else if (typeof type === 'object') {
+        } else if (typeof type === 'object' || typeof type === 'function') {
             // 表述的是一个组件
             if (!ov) {
-                mountComponent(nv, container, anchor);
+                // 如果该组件已经被 KeepAlive，则不会重新挂载它，而是会调用 _activate 来激活它
+                if (nv.keptAlive) {
+                    nv.keepAliveInstance?._activate(nv, container, anchor);
+                } else {
+                    mountComponent(nv, container, anchor);
+                }
+            }
+            else {
+                patchComponent(ov, nv, anchor);
             }
         }
     };
@@ -338,7 +423,17 @@ const createRenderer = (option) => {
      * @param {HTMLElement} anchor 锚点
      */
     const mountComponent = (vnode, container, anchor) => {
-        const componentOptions = vnode.type;
+        const isFunctional = typeof vnode.type === 'function';
+
+        let componentOptions = vnode.type;
+
+        if (isFunctional) {
+            componentOptions = {
+                render: vnode.type,
+                props: vnode.type.props,
+            }
+        }
+
         const { 
             data,
             props: propsOption,
@@ -382,6 +477,20 @@ const createRenderer = (option) => {
             subTree: null,
             slots,
             mounted: [],
+            unmounted: [],
+            // 只有 KeepAlive 组件的实例下会有 keepAliveCtx 属性
+            keepAliveCtx: null,
+        }
+
+        const isKeepAlive = vnode.type[IsKeepAlive];
+        if (isKeepAlive) {
+            instance.keepAliveCtx = {
+                // 本质上是将组件渲染的内容移动到指定容器中，即隐藏容器中
+                move: (vnode, container, anchor) => {
+                    insert(vnode.component.subTree.el, container, anchor);
+                },
+                createElement,
+            };
         }
 
         // setupContext
@@ -504,7 +613,7 @@ const createRenderer = (option) => {
      * @param {Object} nv 新虚拟DOM
      * @param {HTMLElement} container 容器
      */
-    const patchComponent = (ov, nv, container, anchor) => {
+    const patchComponent = (ov, nv, anchor) => {
         // 获取组件实例，即 n1.component
         const instance = (nv.component = ov.component);
         // 本身就是 shallowReactive 的 props, 直接赋值即可就可以触发响应式更新
@@ -948,10 +1057,6 @@ const createRenderer = (option) => {
                 }).catch((err) => {
                     console.error('Async component loading failed:', err);
                     error.value = err;
-                }).finally(() => {
-                    // 清除定时器
-                    timer && clearTimeout(timer);
-                    loadingTimer && clearTimeout(loadingTimer);
                 })
 
                 if (finalOptions.timeout) {
@@ -963,6 +1068,12 @@ const createRenderer = (option) => {
                         error.value = err;
                     }, finalOptions.timeout);
                 }
+
+                onUnmounted(() => {
+                    // 清除定时器
+                    timer && clearTimeout(timer);
+                    loadingTimer && clearTimeout(loadingTimer);
+                });
 
                 return () => {
                     if (loaded.value) {
@@ -993,6 +1104,8 @@ const createRenderer = (option) => {
         defineAsyncComponent,
         render,
         onMounted,
+        onUnmounted,
+        KeepAlive,
     }
 }
 
