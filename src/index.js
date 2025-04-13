@@ -1,6 +1,6 @@
 import { computed, effect, ref } from '@vue/reactivity';
 
-import createRenderer, { Text, Comment, Fragment } from '@/compiler/index.js';
+import createRenderer, { Text, Comment, Fragment, Teleport } from '@/compiler/index.js';
 
 import { randomColor as getRandomColor } from '@/utils/index.js';
 import { selfSetAttribute } from '@/utils/dom.js';
@@ -42,7 +42,6 @@ const MyComponent = {
         const { title } = props;
 
         onMounted(() => {
-            console.log('mounted', title);
             setTimeout(() => {
                 randomColor.value = getRandomColor();  
             }, 3000);
@@ -155,11 +154,6 @@ function FuncComponent(props) {
         },
         children: [
             {
-                type: 'h4',
-                key: 'the-func-component-child-1',
-                children: props.title,
-            },
-            {
                 type: 'p',
                 key: 'the-func-component-child-2',
                 props: {
@@ -177,10 +171,6 @@ function FuncComponent(props) {
 }
 
 FuncComponent.props = {
-    title: {
-        type: String,
-        default: 'default title',
-    },
     color: {
         type: String,
         default: 'red',
@@ -322,7 +312,7 @@ const vnode = () => ({
             type: FuncComponent,
             key: 'the-func-component',
             props: {
-                title: 'is a function component',
+                // title: 'is a function component',
                 color: getRandomColor(),
                 content: 'this is a function component',
             },
@@ -360,58 +350,59 @@ const vnode = () => ({
             },
             children: 'reverse list add new item',
         },
-        {
-            type: defineAsyncComponent({
-                loader: () => new Promise((resolve, reject) => {
-                    setTimeout(() => {
-                        reject('加载失败!')
-                    }, 1000)
-                }),
-                errorComponent: {
-                    name: 'ErrorComponent',
-                    props: {
-                        error: {
-                            type: Error,
-                        }
-                    },
-                    setup(props) {
-                        return () => {
-                            return {
-                                type: 'div',
-                                key: 'the-async-component-error',
-                                children: '加载失败',
-                            }
-                        }
-                    }
-                },
-                loadingComponent: {
-                    name: 'loadingComponent',
-                    props: {
-                        style: resolveStyle({
+        // {
+        //     type: defineAsyncComponent({
+        //         loader: () => new Promise((resolve, reject) => {
+        //             setTimeout(() => {
+        //                 reject('加载失败!')
+        //             }, 1000)
+        //         }),
+        //         errorComponent: {
+        //             name: 'ErrorComponent',
+        //             props: {
+        //                 error: {
+        //                     type: Error,
+        //                 }
+        //             },
+        //             setup(props) {
+        //                 return () => {
+        //                     return {
+        //                         type: 'div',
+        //                         key: 'the-async-component-error',
+        //                         children: '加载失败',
+        //                     }
+        //                 }
+        //             }
+        //         },
+        //         loadingComponent: {
+        //             name: 'loadingComponent',
+        //             props: {
+        //                 style: resolveStyle({
                             
-                        })
-                    },
-                    setup(props) {
-                        return () => {
-                            return {
-                                type: 'div',
-                                key: 'the-async-component-loading',
-                                children: '加载中...',
-                            }
-                        }
-                    }
-                },
-                onError: (retry, fail, retries) => {
-                    if (retries >= 2) {
-                        fail();
-                        return;
-                    }
-                    setTimeout(() => {
-                        retry();
-                    }, 0);
-                }
-            }),
-        }
+        //                 })
+        //             },
+        //             setup(props) {
+        //                 return () => {
+        //                     return {
+        //                         type: 'div',
+        //                         key: 'the-async-component-loading',
+        //                         children: '加载中...',
+        //                     }
+        //                 }
+        //             }
+        //         },
+        //         onError: (retry, fail, retries) => {
+        //             if (retries >= 2) {
+        //                 fail();
+        //                 return;
+        //             }
+        //             setTimeout(() => {
+        //                 retry();
+        //             }, 0);
+        //         }
+        //     }),
+        //     key: 'normal-async-component',
+        // }
     ],
 });
 

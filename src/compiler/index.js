@@ -38,6 +38,9 @@ export const Fragment = Symbol.for('Fragment');
 export const IsKeepAlive = Symbol.for('KeepAlive')
 export const shouldKeepAlive = Symbol.for('shouldKeepAlive')
 
+/** Teleport */
+export const IsTeleport = Symbol.for('Teleport');
+
 /**
  * @description 创建一个渲染器
  * @param {Object} option 配置项
@@ -58,7 +61,6 @@ const createRenderer = (option) => {
     const p = Promise.resolve();
     const queueJob = (job) => {
         queue.add(job);
-        console.log(queue);
         if (!isFlushing) {
             // 标识设为 true, 避免重复刷新
             isFlushing = true;
@@ -98,6 +100,13 @@ const createRenderer = (option) => {
         }
     }
 
+    const deepFindComponent = (vnode) => {
+        return vnode.component ? deepFindComponent(vnode.component.subTree) : vnode;
+    };
+
+    /**
+     * @description KeepAlive 内置组件
+     */
     const KeepAlive = {
         // KeepAlive 组件独有的属性，用作标识
         [IsKeepAlive]: true,
@@ -165,6 +174,32 @@ const createRenderer = (option) => {
                 return rawVNode;
             }
         },
+    }
+
+    /**
+     * @description Teleport 组件
+     */
+    const Teleport = {
+        [IsTeleport]: true,
+        process: (ov, nv, container, anchor, internals) => {
+            const { patch, patchChildren, move } = internals;
+            if (!ov) {
+                const target = typeof nv.props.to === 'string' ? document.querySelector(nv.props.to) : nv.props.to;
+                nv.children.forEach(child => {
+                    patch(null, child, target, anchor);
+                });
+            } else {
+                if (ov.props.to !== nv.props.to) {
+                    const newTarget = typeof nv.props.to === 'string' ? document.querySelector(nv.props.to) : nv.props.to;
+                    
+                    nv.children.forEach(child => {
+                        move(child, newTarget);
+                    })
+                } else {
+                    patchChildren(ov, nv, container);
+                }
+            }
+        }
     }
 
     /**
@@ -287,6 +322,20 @@ const createRenderer = (option) => {
                 // 如果旧 vnode 存在，只需要使用新 Fragment 的子节点更新旧 Fragment 的子节点即
                 patchChildren(ov, nv, container);
             }
+        } else if (typeof type === 'object' && type[IsTeleport]) {
+            // 组件选项中如果存在 isTeleport 标识，则它是 Teleport 组件
+            // 调用 Teleport 组件选项中的 process 函数将控制权交接出去
+            const { process } = type;
+            process?.(ov, nv, container, anchor, {
+                patch,
+                patchChildren,
+                unmount,
+                move: (vnode, container, anchor) => {
+                    // 这里还只考虑了组件、和普通元素的情况，其实还有 Text 和 Comment 等等情况
+                    insert(deepFindComponent(vnode).el, container, anchor)
+                },
+            })
+
         } else if (typeof type === 'object' || typeof type === 'function') {
             // 表述的是一个组件
             if (!ov) {
@@ -487,7 +536,7 @@ const createRenderer = (option) => {
             instance.keepAliveCtx = {
                 // 本质上是将组件渲染的内容移动到指定容器中，即隐藏容器中
                 move: (vnode, container, anchor) => {
-                    insert(vnode.component.subTree.el, container, anchor);
+                    insert(deepFindComponent(vnode).el, container, anchor);
                 },
                 createElement,
             };
@@ -539,7 +588,7 @@ const createRenderer = (option) => {
                 else if (setupState && key in setupState) {
                     return setupState[key];
                 }
-                else if (k === '$slots') {
+                else if (key === '$slots') {
                     return slots
                 }
                 console.error('不存在');
@@ -588,6 +637,7 @@ const createRenderer = (option) => {
             // 初次挂载
             if (!instance.isMounted) {
                 beforeMount && beforeMount.call(renderContext);
+
                 patch(null, subTree, container, anchor);
                 instance.isMounted = true;
                 // 其他生命周期函数同理
@@ -598,12 +648,11 @@ const createRenderer = (option) => {
             // 当 isMounted 为 true 时，说明组件已经被挂载，只需要完成自更新即
             else {
                 beforeUpdate && beforeUpdate.call(renderContext);
+               
                 patch(instance.subTree, subTree, container, anchor);
                 updated && updated.call(renderContext);
             }
-            instance.subTree = subTree
-        }, {
-            // scheduler: (ef) => queueJob(ef),
+            instance.subTree = subTree;
         });
     };
 
@@ -1023,7 +1072,6 @@ const createRenderer = (option) => {
         return {
             name: 'AsyncComponentWrapper',
             setup() {
-                const { loader } = finalOptions;
                 // 异步组件是否加载成功
                 const loaded = ref(false);
                 // 异步组件是否加载超时
@@ -1050,7 +1098,6 @@ const createRenderer = (option) => {
                 }
 
                 // loader 是一个函数，表示异步加载组件的函数
-                // 通过 loader 函数获取组件
                 doLoad().then((component) => {
                     InnerComponent = component.default || component;
                     loaded.value = true;
@@ -1058,7 +1105,7 @@ const createRenderer = (option) => {
                     console.error('Async component loading failed:', err);
                     error.value = err;
                 })
-
+                
                 if (finalOptions.timeout) {
                     // 设置定时器，超时后将 timeout 设置为 true
                     timer = setTimeout(() => {
@@ -1106,6 +1153,7 @@ const createRenderer = (option) => {
         onMounted,
         onUnmounted,
         KeepAlive,
+        Teleport,
     }
 }
 

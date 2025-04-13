@@ -9,7 +9,7 @@ const AsyncComponentVnode = {
             props: {
                 style: resolveStyle('margin: 8px 16px; font-size: 16px; cursor: pointer; user-select: none;'),
             },
-            children: 'this is a async component vnode',
+            children: '不算什么啊',
         })
     }
 }
