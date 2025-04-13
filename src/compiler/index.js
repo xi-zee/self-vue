@@ -54,6 +54,7 @@ const createRenderer = (option) => {
         insert,
         setElementText,
         patchProps,
+        nextFrame,
     } = option;
 
     const queue = new Set();
@@ -108,6 +109,7 @@ const createRenderer = (option) => {
      * @description KeepAlive 内置组件
      */
     const KeepAlive = {
+        name: 'KeepAlive',
         // KeepAlive 组件独有的属性，用作标识
         [IsKeepAlive]: true,
         props: {
@@ -180,6 +182,7 @@ const createRenderer = (option) => {
      * @description Teleport 组件
      */
     const Teleport = {
+        name: 'Teleport',
         [IsTeleport]: true,
         process: (ov, nv, container, anchor, internals) => {
             const { patch, patchChildren, move } = internals;
@@ -201,6 +204,51 @@ const createRenderer = (option) => {
             }
         }
     }
+
+    /**
+     * @description Transition 组件
+     */
+    const Transition = {
+        name: 'Transition',
+        setup(props, { slots }) {
+            const defaultSlot = slots.default || (() => []);
+            const innerVnode = defaultSlot();
+            innerVnode.transition = {
+                beforeEnter(el) {
+                    el?.classList.add('enter-from');
+                    el?.classList.add('enter-active');
+                },
+                enter(el) {
+                    nextFrame(() => {
+                        el?.classList.remove('enter-from');
+                        el?.classList.add('enter-to');
+                        el?.addEventListener('transitionend', () => {
+                            el?.classList.remove('enter-to');
+                            el?.classList.remove('enter-active');
+                        });
+                    });
+                },
+                leave(el, performRemove) {
+                    el?.classList.add('leave-from');
+                    el?.classList.add('leave-active');
+                    document.body.offsetHeight; // 触发重排
+                    nextFrame(() => {
+                        el?.classList.remove('leave-from');
+                        el?.classList.add('leave-to');
+                        el?.addEventListener('transitionend', () => {
+                            el?.classList.remove('leave-active');
+                            el?.classList.remove('leave-to');
+                            performRemove?.();
+                        });
+                    });
+                },
+            }
+
+            return () => {
+                return innerVnode;
+            }
+        }
+    };
 
     /**
      * @description 简单的虚拟DOM渲染器
@@ -267,7 +315,16 @@ const createRenderer = (option) => {
         }
 
         const parent = vnode.el?.parentNode;
-        parent && parent.removeChild(vnode.el);
+        if (parent) {
+            const performRemove = () => parent.removeChild(vnode.el);
+            const needTransition = !!vnode.transition;
+            if (needTransition) {
+                // 调用 transition.leave 钩子，并将 DOM 元素作为参数传递
+                vnode.transition.leave?.(vnode.el, performRemove);
+            } else {
+                performRemove();
+            }
+        }
     };
 
     /**
@@ -375,8 +432,20 @@ const createRenderer = (option) => {
                 patchProps(el, key, null, vnode.props[key]);
             }
         }
+
+        const needTransition = !!vnode.transition;
+
+        if (needTransition) {
+            // 调用 transition.beforeEnter 钩子，并将 DOM 元素作为参数传递
+            vnode.transition.beforeEnter?.(el);
+        }
         
         insert(el, container, anchor);
+
+        if (needTransition) {
+            // 调用 transition.enter 钩子，并将 DOM 元素作为参数传递
+            vnode.transition.enter?.(el);
+        }
     };
 
     /**
@@ -1154,6 +1223,7 @@ const createRenderer = (option) => {
         onUnmounted,
         KeepAlive,
         Teleport,
+        Transition,
     }
 }
 

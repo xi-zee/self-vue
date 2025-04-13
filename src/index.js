@@ -20,6 +20,7 @@ const { render, onMounted, defineAsyncComponent, KeepAlive } = createRenderer({
         el.textContent = text;
     },
     patchProps: selfSetAttribute,
+    nextFrame: requestAnimationFrame,
 });
 /**
  * @description 根节点
